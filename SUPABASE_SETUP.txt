@@ -1,0 +1,45 @@
+--- SEBA BLOOD NETWORK - COMPREHENSIVE PROFILE SETUP ---
+
+Eituku code copy kore Supabase Dashboard-er SQL Editor-e giye 'Run' click korun:
+
+-----------------------------------------------------------
+-- 1. Create Profiles Table with all personal details
+create table if not exists public.profiles (
+  id uuid references auth.users on delete cascade primary key,
+  full_name text,
+  blood_group text,
+  phone text,
+  location text, -- City/District
+  address text, -- Detailed Address
+  status text default 'Active Donor',
+  role text default 'user',
+  donations_count int default 0,
+  bio text,
+  updated_at timestamp with time zone default now()
+);
+
+-- 2. Update Trigger to include Blood Group from Signup
+create or replace function public.handle_new_user()
+returns trigger as $$
+begin
+  insert into public.profiles (id, full_name, blood_group)
+  values (
+    new.id, 
+    new.raw_user_meta_data->>'full_name',
+    new.raw_user_meta_data->>'blood_group'
+  );
+  return new;
+end;
+$$ language plpgsql security definer;
+
+-- Re-create trigger
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute procedure public.handle_new_user();
+
+-- 3. RLS Policies
+alter table public.profiles enable row level security;
+create policy "Anyone can view profiles" on public.profiles for select using (true);
+create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
+-----------------------------------------------------------
