@@ -10,7 +10,10 @@ const isSupabaseConfigured = SUPABASE_URL !== 'YOUR_SUPABASE_URL' && SUPABASE_KE
 const supabase = isSupabaseConfigured ? createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 
 function App() {
-  const [requests, setRequests] = useState(() => JSON.parse(localStorage.getItem('seba_requests')) || []);
+  const [requests, setRequests] = useState(() => JSON.parse(localStorage.getItem('seba_requests')) || [
+    { id: 1, patient_name: 'করিম মিয়া', blood_group: 'A+', location: 'ঢাকা মেডিকেল', phone: '01700000000', posted_by: 'admin@seba.com', created_at: new Date().toISOString() },
+    { id: 2, patient_name: 'রহিমা বেগম', blood_group: 'O-', location: 'চট্টগ্রাম হাসপাতাল', phone: '01800000000', posted_by: 'admin@seba.com', created_at: new Date().toISOString() }
+  ]);
   const [users, setUsers] = useState(() => JSON.parse(localStorage.getItem('seba_users')) || [
     { email: 'admin@seba.com', password: 'admin', name: 'অ্যাডমিন', role: 'admin' }
   ]);
