@@ -33,11 +33,10 @@ function App() {
     const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (session) syncData();
-      if (event === 'PASSWORD_RECOVERY') setAuthView('reset');
     });
 
-    const requestsSub = supabase.channel('blood_requests_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'blood_requests' }, () => fetchRequests()).subscribe();
-    const profilesSub = supabase.channel('profiles_changes').on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchProfiles()).subscribe();
+    const requestsSub = supabase.channel('blood_requests').on('postgres_changes', { event: '*', schema: 'public', table: 'blood_requests' }, () => fetchRequests()).subscribe();
+    const profilesSub = supabase.channel('profiles').on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => fetchProfiles()).subscribe();
 
     return () => {
       authSub.unsubscribe();
@@ -65,7 +64,7 @@ function App() {
   const fetchMyProfile = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
     if (data) setMyProfile(data);
   };
 
@@ -73,23 +72,23 @@ function App() {
     const file = e.target.files[0];
     if (!file) return;
     setLoading(true);
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${session.user.id}-${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
+    const fileName = `${session.user.id}-${Date.now()}.${file.name.split('.').pop()}`;
 
-    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file);
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, file);
     if (uploadError) {
-      alert('ফটো আপলোড ব্যর্থ! SQL পলিসি ঠিকমতো রান করেছেন তো?');
+      alert('ফটো আপলোড ব্যর্থ: ' + uploadError.message);
       setLoading(false);
       return;
     }
 
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
     const { error: updateError } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', session.user.id);
     
     if (!updateError) {
       setMyProfile(prev => ({ ...prev, avatar_url: publicUrl }));
-      alert('ফটো সফলভাবে আপডেট হয়েছে! ✨');
+      alert('ফটো আপডেট হয়েছে! ✨');
+    } else {
+      alert('প্রোফাইলে ফটো লিঙ্ক করতে ব্যর্থ: ' + updateError.message);
     }
     setLoading(false);
   };
@@ -98,7 +97,7 @@ function App() {
     e.preventDefault();
     setLoading(true);
     const fd = new FormData(e.target);
-    const upd = {
+    const updData = {
       id: session.user.id,
       full_name: fd.get('name'),
       blood_group: fd.get('bgroup'),
@@ -110,11 +109,15 @@ function App() {
       updated_at: new Date()
     };
 
-    const { error } = await supabase.from('profiles').upsert(upd, { onConflict: 'id' });
+    // Use upsert to handle both creation and update
+    const { error } = await supabase.from('profiles').upsert(updData);
+    
     if (!error) {
       alert('প্রোফাইল সেভ হয়েছে! ✨');
       fetchMyProfile();
-    } else alert('Error: ' + error.message);
+    } else {
+      alert('সেভ এরর: ' + error.message);
+    }
     setLoading(false);
   };
 
@@ -147,11 +150,11 @@ function App() {
           setLoading(false);
         }}>
           {authView === 'signup' && (
-            <><input name="name" placeholder="নাম" required /><select name="bgroup" required><option value="">রক্তের গ্রুপ</option>{bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}</select></>
+            <><input name="name" placeholder="আপনার নাম" required /><select name="bgroup" required><option value="">রক্তের গ্রুপ</option>{bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}</select></>
           )}
           <input name="email" type="email" placeholder="ইমেইল" required />
           <input name="password" type="password" placeholder="পাসওয়ার্ড" required minLength={6} />
-          <button type="submit" className="btn-primary" disabled={loading}>{authView === 'login' ? 'লগইন' : 'জয়েন করুন'}</button>
+          <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'অপেক্ষা করুন...' : (authView === 'login' ? 'লগইন' : 'জয়েন করুন')}</button>
         </form>
         <p className="auth-footer" onClick={() => setAuthView(authView === 'login' ? 'signup' : 'login')}>{authView === 'login' ? "নতুন অ্যাকাউন্ট?" : "লগইন করুন"}</p>
       </div>
@@ -201,7 +204,7 @@ function App() {
             <div className="pro-profile-header glass">
               <div className="avatar-wrapper">
                 <img src={myProfile.avatar_url || `https://ui-avatars.com/api/?name=${myProfile.full_name}&background=random`} alt="Avatar" className="avatar-large-img" />
-                <label className="upload-btn">📷<input type="file" accept="image/*" onChange={handleUpload} style={{display:'none'}} /></label>
+                <label className="upload-btn">📷<input type="file" accept="image/*" onChange={handleUpload} style={{display:'none'}} disabled={loading} /></label>
               </div>
               <div>
                 <h2>{myProfile.full_name || 'আপনার নাম'}</h2>
@@ -223,7 +226,9 @@ function App() {
                 </div>
                 <div className="input-group"><label>বিস্তারিত ঠিকানা</label><input name="address" defaultValue={myProfile.address} /></div>
                 <div className="input-group"><label>বায়ো/পরিচয়</label><textarea name="bio" defaultValue={myProfile.bio}></textarea></div>
-                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'সেভ হচ্ছে...' : 'প্রোফাইল সেভ করুন'}</button>
+                <button type="submit" className="btn-primary" disabled={loading}>
+                   {loading ? <div className="spinner"></div> : 'প্রোফাইল সেভ করুন'}
+                </button>
               </form>
             </div>
           </div>
@@ -301,7 +306,7 @@ function App() {
                 <input name="pname" placeholder="রোগীর নাম" required />
                 <div className="row-2"><select name="bgroup" required><option value="">গ্রুপ</option>{bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}</select><input name="phone" placeholder="ফোন নম্বর" required /></div>
                 <input name="loc" placeholder="হাসপাতাল ও ঠিকানা" required />
-                <button type="submit" className="btn-primary" disabled={loading}>{loading ? 'পোস্ট হচ্ছে...' : 'আবেদন পোস্ট করুন'}</button>
+                <button type="submit" className="btn-primary" disabled={loading}>{loading ? <div className="spinner"></div> : 'আবেদন পোস্ট করুন'}</button>
               </form>
             </div>
           </div>
