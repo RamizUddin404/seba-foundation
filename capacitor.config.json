@@ -1,0 +1,6 @@
+{
+  "appId": "com.seba.foundation",
+  "appName": "Seba Foundation",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}

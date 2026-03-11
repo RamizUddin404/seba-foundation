@@ -4,7 +4,12 @@ import './App.css';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.error("Supabase credentials missing! Please check your .env file.");
+}
+
+const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
 
 function App() {
   const [session, setSession] = useState(null);
@@ -37,12 +42,24 @@ function App() {
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+    const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
       if (session) syncData();
       if (event === 'PASSWORD_RECOVERY') setAuthView('reset');
     });
-    return () => subscription.unsubscribe();
+
+    // Real-time subscription for blood requests
+    const requestsSub = supabase
+      .channel('blood_requests_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'blood_requests' }, () => {
+        fetchRequests();
+      })
+      .subscribe();
+
+    return () => {
+      authSub.unsubscribe();
+      supabase.removeChannel(requestsSub);
+    };
   }, []);
 
   const syncData = async () => {
@@ -67,6 +84,20 @@ function App() {
     if (data) {
       setMyProfile(data);
     }
+  };
+
+  const deleteRequest = async (id) => {
+    if (window.confirm('আপনি কি এই আবেদনটি মুছে ফেলতে চান?')) {
+      const { error } = await supabase.from('blood_requests').delete().eq('id', id);
+      if (error) alert(error.message);
+      else fetchRequests();
+    }
+  };
+
+  const completeRequest = async (id) => {
+    const { error } = await supabase.from('blood_requests').update({ status: 'completed' }).eq('id', id);
+    if (error) alert(error.message);
+    else fetchRequests();
   };
 
   const saveProfile = async (e) => {
@@ -143,6 +174,7 @@ function App() {
         <nav className="side-nav">
           <li className={activeTab === 'home' ? 'active' : ''} onClick={() => setActiveTab('home')}>ড্যাশবোর্ড</li>
           <li className={activeTab === 'live' ? 'active' : ''} onClick={() => setActiveTab('live')}>লাইভ ফিড</li>
+          <li className={activeTab === 'request' ? 'active' : ''} onClick={() => setActiveTab('request')}>রক্তের আবেদন</li>
           <li className={activeTab === 'donors' ? 'active' : ''} onClick={() => setActiveTab('donors')}>রক্তদাতা তালিকা</li>
           <li className={activeTab === 'profile' ? 'active' : ''} onClick={() => setActiveTab('profile')}>আমার প্রোফাইল</li>
           <li onClick={() => supabase.auth.signOut()} className="logout-btn">লগআউট</li>
@@ -247,9 +279,15 @@ function App() {
                   <div className="blood-badge" style={{marginBottom:'1rem'}}>{req.blood_group}</div>
                   <h3>{req.patient_name}</h3>
                   <p>📍 {req.location} | 📞 {req.phone}</p>
-                  <div style={{display:'flex', gap:'0.5rem', marginTop:'1.5rem'}}>
+                  <div style={{display:'flex', gap:'0.5rem', marginTop:'1.5rem', flexWrap:'wrap'}}>
                     {req.status === 'pending' && <button className="btn-accept" onClick={() => supabase.from('blood_requests').update({status:'accepted', accepted_by: session.user.email}).eq('id', req.id)}>আমি দিব</button>}
                     <button className="btn-call" onClick={() => window.open(`tel:${req.phone}`)}>কল</button>
+                    {(req.posted_by === session.user.email || isAdmin) && (
+                      <>
+                        <button className="btn-success" onClick={() => completeRequest(req.id)}>সফল</button>
+                        <button className="btn-del-sm" onClick={() => deleteRequest(req.id)}>মুছুন</button>
+                      </>
+                    )}
                   </div>
                 </div>
               ))}
@@ -322,6 +360,7 @@ function App() {
       <nav className="bottom-nav show-mobile">
         <li className={activeTab === 'home' ? 'active' : ''} onClick={() => setActiveTab('home')}>🏠</li>
         <li className={activeTab === 'live' ? 'active' : ''} onClick={() => setActiveTab('live')}>🩸</li>
+        <li className={activeTab === 'request' ? 'active' : ''} onClick={() => setActiveTab('request')}>📝</li>
         <li className={activeTab === 'donors' ? 'active' : ''} onClick={() => setActiveTab('donors')}>👥</li>
         <li className={activeTab === 'profile' ? 'active' : ''} onClick={() => setActiveTab('profile')}>⚙️</li>
       </nav>
