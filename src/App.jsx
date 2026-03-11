@@ -11,11 +11,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ---------------------- HELPERS ----------------------
 const checkEligibility = (lastDate) => {
-  if (!lastDate) return { status: 'Available', daysLeft: 0 };
+  if (!lastDate) return { isEligible: true, status: 'Available', daysLeft: 0 };
   const last = new Date(lastDate);
   const now = new Date();
-  const diffTime = now - last;
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  const diffDays = Math.ceil((now - last) / (1000 * 60 * 60 * 24));
   return {
     isEligible: diffDays > 90,
     daysLeft: 90 - diffDays,
@@ -25,7 +24,7 @@ const checkEligibility = (lastDate) => {
 
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('bn-BD', { day: 'numeric', month: 'long', year: 'numeric' }) : 'কখনো না';
 
-// ---------------------- AI CHAT ----------------------
+// ---------------------- AI CHATBOT ----------------------
 const ChatBot = () => {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState([{ role: 'assistant', content: 'আসসালামু আলাইকুম! আমি সেবা এআই। আমি আপনাকে রক্তদান সংক্রান্ত তথ্য দিয়ে সাহায্য করতে পারি।' }]);
@@ -104,13 +103,10 @@ function App() {
     e.preventDefault();
     setLoading(true);
     const fd = new FormData(e.target);
-    const phone = fd.get('phone');
-    
-    // Upsert logic: Phone number is unique, so it will update if exists
     const { error } = await supabase.from('donors').upsert({
       full_name: fd.get('name'),
       blood_group: fd.get('bgroup'),
-      phone: phone,
+      phone: fd.get('phone'),
       location: fd.get('loc'),
       last_donation_date: fd.get('ldate') || null
     }, { onConflict: 'phone' });
@@ -119,7 +115,6 @@ function App() {
     else {
       alert('তথ্য সফলভাবে সংরক্ষিত হয়েছে! ✨');
       setActiveTab('list');
-      fetchDonors();
     }
     setLoading(false);
   };
@@ -133,37 +128,37 @@ function App() {
         <nav className="side-nav">
           <li className={activeTab === 'home' ? 'active' : ''} onClick={() => setActiveTab('home')}>🏠 ড্যাশবোর্ড</li>
           <li className={activeTab === 'list' ? 'active' : ''} onClick={() => setActiveTab('list')}>🔍 ডোনার খুঁজুন</li>
-          <li className={activeTab === 'add' ? 'active' : ''} onClick={() => setActiveTab('add')}>➕ ডোনার হোন</li>
+          <li className={activeTab === 'add' ? 'active' : ''} onClick={() => setActiveTab('add')}>➕ ডোনার ইনফো</li>
         </nav>
       </aside>
 
       <main className="content-container">
         <header className="mobile-header show-mobile glass">
-          <div className="logo-icon">🩸</div><h2>SEBA</h2>
+          <div className="logo-icon 3d-icon">🩸</div><h2>SEBA</h2>
         </header>
 
         {activeTab === 'home' && (
           <div className="home-view animate-fade">
             <div className="hero glass 3d-card">
               <h1>মানবতার ডিজিটাল সেবা ❤️</h1>
-              <p>রক্ত দিন, জীবন বাঁচান। কোনো রেজিস্ট্রেশন ছাড়াই সরাসরি যুক্ত হোন।</p>
-              <div className="stats">
-                <div className="stat"><h3>{donors.length}</h3><p>মোট ডোনার</p></div>
-                <div className="stat"><h3>{donors.filter(d => checkEligibility(d.last_donation_date).isEligible).length}</h3><p>প্রস্তুত আছেন</p></div>
+              <p>রক্ত দিন, জীবন বাঁচান। বাংলাদেশের সবচেয়ে সহজ রক্তদাতা নেটওয়ার্ক।</p>
+              <div className="stats-row">
+                <div className="stat-card glass"><h3>{donors.length}</h3><p>মোট ডোনার</p></div>
+                <div className="stat-card glass"><h3>{donors.filter(d => checkEligibility(d.last_donation_date).isEligible).length}</h3><p>অ্যাভেইলেবল</p></div>
               </div>
             </div>
             <div className="action-grid">
-              <button className="btn-3d btn-main" onClick={() => setActiveTab('list')}>🔍 রক্তদাতা খুঁজুন</button>
-              <button className="btn-3d btn-sub" onClick={() => setActiveTab('add')}>🩸 ডোনার হিসেবে যুক্ত হোন</button>
+              <button className="btn-3d btn-primary" onClick={() => setActiveTab('list')}>🔍 রক্তদাতা খুঁজুন</button>
+              <button className="btn-3d btn-sub" onClick={() => setActiveTab('add')}>🩸 তথ্য যোগ করুন</button>
             </div>
           </div>
         )}
 
         {activeTab === 'list' && (
-          <div className="donor-list animate-fade">
-            <h2 className="title">রক্তদাতার তালিকা 🩸</h2>
+          <div className="list-view animate-fade">
+            <h2 className="title">ডোনার লিস্ট 🩸</h2>
             <div className="filter-box glass">
-              <input placeholder="এলাকা বা নাম..." onChange={e => setSearch(e.target.value.toLowerCase())} />
+              <input placeholder="শহর বা নাম দিয়ে খুঁজুন..." onChange={e => setSearch(e.target.value.toLowerCase())} />
               <select onChange={e => setGroup(e.target.value)}>
                 <option value="All">সব গ্রুপ</option>
                 {bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}
@@ -177,16 +172,20 @@ function App() {
                   const el = checkEligibility(d.last_donation_date);
                   return (
                     <div key={d.id} className={`card glass 3d-card ${!el.isEligible ? 'busy' : ''}`}>
-                      <div className="card-bg">{d.blood_group}</div>
+                      <div className="blood-icon">{d.blood_group}</div>
                       <h3>{d.full_name}</h3>
                       <p>📍 {d.location}</p>
-                      <div className="status">
+                      <div className="status-badge">
                         {el.isEligible ? 
-                          <span className="available">✅ রক্ত দিতে প্রস্তুত</span> : 
-                          <span className="already">⏳ {formatDate(d.last_donation_date)} এ দিয়েছেন</span>
+                          <span className="available">✅ Available</span> : 
+                          <span className="already">⏳ Donated ({formatDate(d.last_donation_date)})</span>
                         }
                       </div>
-                      {el.isEligible && <button className="call-btn" onClick={() => window.open(`tel:${d.phone}`)}>📞 কল করুন</button>}
+                      {el.isEligible ? (
+                        <button className="btn-call" onClick={() => window.open(`tel:${d.phone}`)}>📞 কল দিন</button>
+                      ) : (
+                        <p className="wait-msg">{el.daysLeft} দিন পর দিতে পারবেন</p>
+                      )}
                     </div>
                   );
                 })}
@@ -197,18 +196,20 @@ function App() {
         {activeTab === 'add' && (
           <div className="add-view animate-fade">
             <div className="form-card glass 3d-card">
-              <h2>ডোনার হিসেবে যুক্ত হোন ✨</h2>
-              <p>আপনার তথ্য পাবলিকলি দেখা যাবে যাতে প্রয়োজনে মানুষ যোগাযোগ করতে পারে।</p>
+              <h2>আপনার তথ্য দিন ✨</h2>
+              <p>আপনার ফোন নম্বর দিয়ে তথ্য আপডেট করতে পারবেন।</p>
               <form onSubmit={registerDonor}>
-                <input name="name" placeholder="আপনার নাম" required />
+                <input name="name" placeholder="আপনার পুরো নাম" required />
                 <div className="row">
                   <select name="bgroup" required><option value="">রক্তের গ্রুপ</option>{bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}</select>
-                  <input name="phone" placeholder="মোবাইল নম্বর (সঠিক দিবেন)" required />
+                  <input name="phone" placeholder="মোবাইল নম্বর (ইউনিক)" required />
                 </div>
-                <input name="loc" placeholder="হাসপাতাল/এলাকা/শহর" required />
-                <label>সর্বশেষ কবে রক্ত দিয়েছেন? (না দিলে খালি রাখুন)</label>
+                <input name="loc" placeholder="হাসপাতাল বা শহরের নাম" required />
+                <label>সর্বশেষ রক্তদানের তারিখ (না দিয়ে থাকলে ফাঁকা রাখুন)</label>
                 <input type="date" name="ldate" />
-                <button type="submit" className="btn-3d btn-main" disabled={loading}>{loading ? 'সেভ হচ্ছে...' : 'তালিকায় যুক্ত হোন'}</button>
+                <button type="submit" className="btn-3d btn-primary" disabled={loading}>
+                  {loading ? <div className="spinner-sm"></div> : 'তালিকায় নাম যোগ করুন'}
+                </button>
               </form>
             </div>
           </div>
