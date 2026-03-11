@@ -2,14 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import './App.css';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = "https://xpylwvyjhxomxhqhacxa.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhweWx3dnlqaHhvbXhocWhhY3hhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMxNDY2NjQsImV4cCI6MjA4ODcyMjY2NH0.oSAwXxDzarxbl8C2THyOxUm-4q_2aPsCq1rzLsXt8Lw";
 
-if (!SUPABASE_URL || !SUPABASE_KEY) {
-  console.error("Supabase credentials missing! Please check your .env file.");
-}
-
-const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 function App() {
   const [session, setSession] = useState(null);
