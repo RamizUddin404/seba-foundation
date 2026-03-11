@@ -18,8 +18,9 @@ function App() {
     location: '',
     address: '',
     bio: '',
-    status: 'Active Donor'
-  }); // Initialize with empty state so UI never disappears
+    status: 'Active Donor',
+    avatar_url: ''
+  });
   const [activeTab, setActiveTab] = useState('home');
   const [loading, setLoading] = useState(false);
   const [authView, setAuthView] = useState('login');
@@ -33,9 +34,7 @@ function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) {
-        syncData();
-      }
+      if (session) syncData();
     });
 
     const { data: { subscription: authSub } } = supabase.auth.onAuthStateChange((event, session) => {
@@ -44,7 +43,6 @@ function App() {
       if (event === 'PASSWORD_RECOVERY') setAuthView('reset');
     });
 
-    // Real-time subscription for blood requests
     const requestsSub = supabase
       .channel('blood_requests_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'blood_requests' }, () => {
@@ -52,9 +50,17 @@ function App() {
       })
       .subscribe();
 
+    const profilesSub = supabase
+      .channel('profiles_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, () => {
+        fetchProfiles();
+      })
+      .subscribe();
+
     return () => {
       authSub.unsubscribe();
       supabase.removeChannel(requestsSub);
+      supabase.removeChannel(profilesSub);
     };
   }, []);
 
@@ -75,25 +81,35 @@ function App() {
   };
 
   const fetchMyProfile = async () => {
-    if (!session?.user) return;
-    const { data } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
-    if (data) {
-      setMyProfile(data);
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+    if (data) setMyProfile(data);
   };
 
-  const deleteRequest = async (id) => {
-    if (window.confirm('আপনি কি এই আবেদনটি মুছে ফেলতে চান?')) {
-      const { error } = await supabase.from('blood_requests').delete().eq('id', id);
-      if (error) alert(error.message);
-      else fetchRequests();
-    }
-  };
+  const handleUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setLoading(true);
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${session.user.id}-${Math.random()}.${fileExt}`;
+    const filePath = `avatars/${fileName}`;
 
-  const completeRequest = async (id) => {
-    const { error } = await supabase.from('blood_requests').update({ status: 'completed' }).eq('id', id);
-    if (error) alert(error.message);
-    else fetchRequests();
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file);
+    if (uploadError) {
+      alert('ফটো আপলোড ব্যর্থ হয়েছে! অনুগ্রহ করে সুপাবেস স্টোরেজে "avatars" বাকেটটি চেক করুন।');
+      setLoading(false);
+      return;
+    }
+
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
+    const { error: updateError } = await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', session.user.id);
+    
+    if (!updateError) {
+      setMyProfile({ ...myProfile, avatar_url: publicUrl });
+      alert('প্রোফাইল ফটো আপডেট হয়েছে! ✨');
+    }
+    setLoading(false);
   };
 
   const saveProfile = async (e) => {
@@ -116,7 +132,6 @@ function App() {
     if (!error) {
       alert('প্রোফাইল সফলভাবে সেভ হয়েছে! ✨');
       fetchMyProfile();
-      fetchProfiles();
     } else alert(error.message);
     setLoading(false);
   };
@@ -141,14 +156,23 @@ function App() {
             const { error } = await supabase.auth.signInWithPassword({ email, password: pass });
             if (error) alert(error.message);
           } else {
-            const { error } = await supabase.auth.signUp({ email, password: pass, options: { data: { full_name: fd.get('name'), blood_group: fd.get('bgroup') } } });
+            const { error } = await supabase.auth.signUp({ 
+              email, 
+              password: pass, 
+              options: { 
+                data: { 
+                  full_name: fd.get('name'), 
+                  blood_group: fd.get('bgroup') 
+                } 
+              } 
+            });
             if (error) alert(error.message); else alert('সফল! এখন লগইন করুন।');
           }
           setLoading(false);
         }}>
           {authView === 'signup' && (
             <>
-              <input name="name" placeholder="নাম" required />
+              <input name="name" placeholder="আপনার নাম" required />
               <select name="bgroup" required><option value="">রক্তের গ্রুপ</option>{bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}</select>
             </>
           )}
@@ -204,10 +228,16 @@ function App() {
           <div className="profile-view animate-fade">
             <h2 className="section-title">প্রোফাইল সেটিংস</h2>
             <div className="pro-profile-header glass">
-              <div className="avatar-large">{myProfile.blood_group || '?'}</div>
+              <div className="avatar-wrapper">
+                <img src={myProfile.avatar_url || `https://ui-avatars.com/api/?name=${myProfile.full_name}&background=random`} alt="Avatar" className="avatar-large-img" />
+                <label className="upload-btn">
+                  📷
+                  <input type="file" accept="image/*" onChange={handleUpload} style={{display:'none'}} />
+                </label>
+              </div>
               <div>
                 <h2>{myProfile.full_name || 'আপনার নাম'}</h2>
-                <p>{session.user.email}</p>
+                <p>{session?.user?.email}</p>
                 <span className="badge-p">{myProfile.status}</span>
               </div>
             </div>
@@ -220,7 +250,7 @@ function App() {
                   <input name="name" defaultValue={myProfile.full_name} placeholder="আপনার নাম লিখুন" required />
                 </div>
                 
-                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1.5rem'}}>
+                <div className="row-2">
                   <div className="input-group">
                     <label>রক্তের গ্রুপ</label>
                     <select name="bgroup" defaultValue={myProfile.blood_group}>
@@ -234,7 +264,7 @@ function App() {
                   </div>
                 </div>
 
-                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1.5rem'}}>
+                <div className="row-2">
                   <div className="input-group">
                     <label>শহর/এলাকা</label>
                     <input name="loc" defaultValue={myProfile.location} placeholder="উদা: ঢাকা" />
@@ -258,7 +288,7 @@ function App() {
                   <textarea name="bio" defaultValue={myProfile.bio} placeholder="আপনার সম্পর্কে কিছু লিখুন..."></textarea>
                 </div>
 
-                <button type="submit" className="btn-primary" disabled={loading} style={{marginTop:'1rem'}}>
+                <button type="submit" className="btn-primary" disabled={loading}>
                   {loading ? 'সেভ হচ্ছে...' : 'প্রোফাইল সেভ করুন'}
                 </button>
               </form>
@@ -269,19 +299,25 @@ function App() {
         {activeTab === 'live' && (
           <div className="feed-view animate-fade">
             <h2 className="section-title">লাইভ ব্লাড ফিড</h2>
-            <div className="pro-grid" style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(320px, 1fr))', gap:'1.5rem'}}>
+            <div className="pro-grid">
               {requests.filter(r => r.status !== 'completed').map(req => (
-                <div key={req.id} className="pro-req-card glass" style={{padding:'1.5rem'}}>
-                  <div className="blood-badge" style={{marginBottom:'1rem'}}>{req.blood_group}</div>
+                <div key={req.id} className="pro-req-card glass">
+                  <div className="req-header">
+                    <div className="blood-badge">{req.blood_group}</div>
+                    <div className="posted-by">পোস্ট করেছেন: {req.posted_by}</div>
+                  </div>
                   <h3>{req.patient_name}</h3>
-                  <p>📍 {req.location} | 📞 {req.phone}</p>
-                  <div style={{display:'flex', gap:'0.5rem', marginTop:'1.5rem', flexWrap:'wrap'}}>
-                    {req.status === 'pending' && <button className="btn-accept" onClick={() => supabase.from('blood_requests').update({status:'accepted', accepted_by: session.user.email}).eq('id', req.id)}>আমি দিব</button>}
+                  <p>📍 {req.location}</p>
+                  <p>📞 {req.phone}</p>
+                  <div className="req-actions">
+                    {req.status === 'pending' && (
+                      <button className="btn-accept" onClick={() => supabase.from('blood_requests').update({status:'accepted', accepted_by: session.user.email}).eq('id', req.id)}>আমি দিব</button>
+                    )}
                     <button className="btn-call" onClick={() => window.open(`tel:${req.phone}`)}>কল</button>
-                    {(req.posted_by === session.user.email || isAdmin) && (
+                    {(req.posted_by === session?.user?.email || isAdmin) && (
                       <>
-                        <button className="btn-success" onClick={() => completeRequest(req.id)}>সফল</button>
-                        <button className="btn-del-sm" onClick={() => deleteRequest(req.id)}>মুছুন</button>
+                        <button className="btn-success" onClick={() => supabase.from('blood_requests').update({status:'completed'}).eq('id', req.id)}>সফল</button>
+                        <button className="btn-del-sm" onClick={() => { if(window.confirm('নিশ্চিত?')) supabase.from('blood_requests').delete().eq('id', req.id) }}>মুছুন</button>
                       </>
                     )}
                   </div>
@@ -294,19 +330,23 @@ function App() {
         {activeTab === 'donors' && (
           <div className="donor-view animate-fade">
             <h2 className="section-title">রক্তদাতার তালিকা</h2>
-            <div style={{display:'flex', gap:'1rem', marginBottom:'2rem'}}>
-              <input placeholder="খুঁজুন..." className="glass" style={{flex:3, marginBottom:0, padding:'1rem'}} onChange={(e) => setSearchQuery(e.target.value.toLowerCase())} />
-              <select className="glass" style={{flex:1, marginBottom:0, padding:'1rem'}} onChange={(e) => setFilterBG(e.target.value)}>
+            <div className="filter-area">
+              <input placeholder="শহর বা নাম দিয়ে খুঁজুন..." className="glass search-input" onChange={(e) => setSearchQuery(e.target.value.toLowerCase())} />
+              <select className="glass filter-select" onChange={(e) => setFilterBG(e.target.value)}>
                 <option value="All">সব গ্রুপ</option>
                 {bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}
               </select>
             </div>
-            <div className="pro-grid" style={{display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(300px, 1fr))', gap:'1.5rem'}}>
+            <div className="pro-grid">
               {profiles.filter(p => (p.full_name?.toLowerCase().includes(searchQuery) || p.location?.toLowerCase().includes(searchQuery)) && (filterBG === 'All' || p.blood_group === filterBG)).map(p => (
-                <div key={p.id} className="pro-donor-card glass" onClick={() => setSelectedUser(p)} style={{padding:'1.5rem', cursor:'pointer'}}>
-                  <div className="donor-blood" style={{width:'50px', height:'50px', borderRadius:'12px', background:'var(--blood)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'800', marginBottom:'1rem', color:'white'}}>{p.blood_group || '?'}</div>
+                <div key={p.id} className="pro-donor-card glass" onClick={() => setSelectedUser(p)}>
+                  <div className="donor-header">
+                     <img src={p.avatar_url || `https://ui-avatars.com/api/?name=${p.full_name}&background=random`} alt="Avatar" className="donor-avatar" />
+                     <div className="donor-blood-tag">{p.blood_group || '?'}</div>
+                  </div>
                   <h3>{p.full_name}</h3>
                   <p>📍 {p.location || 'Unknown'}</p>
+                  <span className={`status-dot ${p.status === 'Active Donor' ? 'active' : 'busy'}`}></span>
                 </div>
               ))}
             </div>
@@ -317,13 +357,15 @@ function App() {
           <div className="modal-overlay" onClick={() => setSelectedUser(null)}>
             <div className="pro-modal glass animate-fade" onClick={e => e.stopPropagation()}>
               <button className="close-btn" onClick={() => setSelectedUser(null)}>✕</button>
-              <div className="avatar-large">{selectedUser.blood_group || '?'}</div>
+              <img src={selectedUser.avatar_url || `https://ui-avatars.com/api/?name=${selectedUser.full_name}&background=random`} alt="Avatar" className="modal-avatar" />
+              <div className="modal-blood-badge">{selectedUser.blood_group || '?'}</div>
               <h2>{selectedUser.full_name}</h2>
-              <div style={{textAlign:'left', margin:'2.5rem 0'}}>
+              <div className="modal-details">
                 <p>📍 <strong>এলাকা:</strong> {selectedUser.location}</p>
                 <p>🏠 <strong>ঠিকানা:</strong> {selectedUser.address}</p>
                 <p>📞 <strong>ফোন:</strong> {selectedUser.phone}</p>
                 <p>📝 <strong>বায়ো:</strong> {selectedUser.bio}</p>
+                <p>⭐ <strong>স্ট্যাটাস:</strong> {selectedUser.status}</p>
               </div>
               <button className="btn-call" onClick={() => window.open(`tel:${selectedUser.phone}`)}>সরাসরি কল দিন</button>
             </div>
@@ -336,17 +378,31 @@ function App() {
               <h2 style={{textAlign:'center', marginBottom:'2rem'}}>রক্তের আবেদন করুন</h2>
               <form onSubmit={async (e) => {
                 e.preventDefault();
+                setLoading(true);
                 const fd = new FormData(e.target);
-                await supabase.from('blood_requests').insert([{ patient_name: fd.get('pname'), blood_group: fd.get('bgroup'), location: fd.get('loc'), phone: fd.get('phone'), posted_by: session.user.email, status: 'pending' }]);
-                alert('আবেদন পোস্ট হয়েছে! 🩸'); setActiveTab('live');
+                const { error } = await supabase.from('blood_requests').insert([{ 
+                  patient_name: fd.get('pname'), 
+                  blood_group: fd.get('bgroup'), 
+                  location: fd.get('loc'), 
+                  phone: fd.get('phone'), 
+                  posted_by: session.user.email, 
+                  status: 'pending' 
+                }]);
+                if(!error) {
+                  alert('আবেদন পোস্ট হয়েছে! 🩸'); 
+                  setActiveTab('live');
+                } else alert(error.message);
+                setLoading(false);
               }}>
                 <input name="pname" placeholder="রোগীর নাম" required />
-                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'1rem', marginTop:'1rem'}}>
+                <div className="row-2" style={{marginTop:'1rem'}}>
                   <select name="bgroup" required><option value="">গ্রুপ</option>{bloodGroups.map(bg => <option key={bg} value={bg}>{bg}</option>)}</select>
-                  <input name="phone" placeholder="ফোন" required />
+                  <input name="phone" placeholder="ফোন নম্বর" required />
                 </div>
-                <input name="loc" placeholder="হাসপাতাল ও ঠিকানা" required style={{marginTop:'1rem'}} />
-                <button type="submit" className="btn-primary" style={{marginTop:'1.5rem'}}>আবেদন পোস্ট করুন</button>
+                <input name="loc" placeholder="হাসপাতাল ও বিস্তারিত ঠিকানা" required style={{marginTop:'1rem'}} />
+                <button type="submit" className="btn-primary" style={{marginTop:'1.5rem'}} disabled={loading}>
+                  {loading ? 'পোস্ট হচ্ছে...' : 'আবেদন পোস্ট করুন'}
+                </button>
               </form>
             </div>
           </div>

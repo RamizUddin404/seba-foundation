@@ -15,6 +15,7 @@ create table if not exists public.profiles (
   role text default 'user',
   donations_count int default 0,
   bio text,
+  avatar_url text, -- For Profile Photo
   updated_at timestamp with time zone default now()
 );
 
@@ -25,44 +26,45 @@ create table if not exists public.blood_requests (
   blood_group text not null,
   location text not null,
   phone text not null,
-  posted_by text not null, -- Stores user email
-  status text default 'pending', -- pending, accepted, completed
+  posted_by text not null, 
+  status text default 'pending', 
   accepted_by text,
   created_at timestamp with time zone default now()
 );
 
--- 3. Update Trigger to include Blood Group from Signup
+-- 3. Storage Setup (Run these in SQL Editor)
+-- Create a bucket named 'avatars' in Supabase Storage dashboard first!
+-- Then run these policies:
+-- insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true);
+
+-- 4. Auto-Profile Creation Trigger
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, full_name, blood_group)
+  insert into public.profiles (id, full_name, blood_group, avatar_url)
   values (
     new.id, 
     new.raw_user_meta_data->>'full_name',
-    new.raw_user_meta_data->>'blood_group'
+    new.raw_user_meta_data->>'blood_group',
+    'https://ui-avatars.com/api/?name=' || encode(convert_to(new.raw_user_meta_data->>'full_name', 'UTF8'), 'escape') || '&background=random'
   );
   return new;
 end;
 $$ language plpgsql security definer;
 
--- Re-create trigger
 drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
 
--- 4. RLS Policies
+-- 5. RLS Policies
 alter table public.profiles enable row level security;
 alter table public.blood_requests enable row level security;
 
--- Profiles Policies
-create policy "Anyone can view profiles" on public.profiles for select using (true);
-create policy "Users can update own profile" on public.profiles for update using (auth.uid() = id);
-
--- Blood Requests Policies
+create policy "Public view profiles" on public.profiles for select using (true);
+create policy "Users update own profile" on public.profiles for update using (auth.uid() = id);
 create policy "Public view requests" on public.blood_requests for select using (true);
 create policy "Auth insert requests" on public.blood_requests for insert with check (auth.role() = 'authenticated');
 create policy "Update requests" on public.blood_requests for update using (true);
 create policy "Delete requests" on public.blood_requests for delete using (auth.email() = posted_by or (select role from profiles where id = auth.uid()) = 'admin');
-
 -----------------------------------------------------------
