@@ -1,9 +1,5 @@
---- SEBA BLOOD NETWORK - COMPREHENSIVE PROFILE SETUP ---
-
-Eituku code copy kore Supabase Dashboard-er SQL Editor-e giye 'Run' click korun:
-
 -----------------------------------------------------------
--- 1. Create Profiles Table
+-- 1. Create Profiles Table (Updated for Public Access & Donation Date)
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
   full_name text,
@@ -11,11 +7,12 @@ create table if not exists public.profiles (
   phone text,
   location text,
   address text,
-  status text default 'Active Donor',
+  status text default 'Available', -- Available / Unavailable
   role text default 'user',
   donations_count int default 0,
+  last_donation_date date, -- ৩ মাসের হিসাবের জন্য
   bio text,
-  avatar_url text, -- For Profile Photo
+  avatar_url text,
   updated_at timestamp with time zone default now()
 );
 
@@ -26,45 +23,33 @@ create table if not exists public.blood_requests (
   blood_group text not null,
   location text not null,
   phone text not null,
-  posted_by text not null, 
+  posted_by text default 'Guest', 
   status text default 'pending', 
   accepted_by text,
   created_at timestamp with time zone default now()
 );
 
 -- 3. Storage Setup (Run these in SQL Editor)
--- Create a bucket named 'avatars' in Supabase Storage dashboard first!
--- Then run these policies:
--- insert into storage.buckets (id, name, public) values ('avatars', 'avatars', true);
+insert into storage.buckets (id, name, public) 
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
 
--- 4. Auto-Profile Creation Trigger
-create or replace function public.handle_new_user()
-returns trigger as $$
-begin
-  insert into public.profiles (id, full_name, blood_group, avatar_url)
-  values (
-    new.id, 
-    new.raw_user_meta_data->>'full_name',
-    new.raw_user_meta_data->>'blood_group',
-    'https://ui-avatars.com/api/?name=' || encode(convert_to(new.raw_user_meta_data->>'full_name', 'UTF8'), 'escape') || '&background=random'
-  );
-  return new;
-end;
-$$ language plpgsql security definer;
-
-drop trigger if exists on_auth_user_created on auth.users;
-create trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
-
--- 5. RLS Policies
+-- 4. POWERFUL PUBLIC POLICIES (No Login Required)
 alter table public.profiles enable row level security;
 alter table public.blood_requests enable row level security;
 
-create policy "Public view profiles" on public.profiles for select using (true);
-create policy "Users update own profile" on public.profiles for update using (auth.uid() = id);
-create policy "Public view requests" on public.blood_requests for select using (true);
-create policy "Auth insert requests" on public.blood_requests for insert with check (auth.role() = 'authenticated');
-create policy "Update requests" on public.blood_requests for update using (true);
-create policy "Delete requests" on public.blood_requests for delete using (auth.email() = posted_by or (select role from profiles where id = auth.uid()) = 'admin');
+-- Allow ANYONE to view everything
+create policy "Public View Profiles" on public.profiles for select using (true);
+create policy "Public View Requests" on public.blood_requests for select using (true);
+
+-- Allow ANYONE to insert requests (Public Request)
+create policy "Public Insert Requests" on public.blood_requests for insert with check (true);
+
+-- Allow Users to manage their own profile (If they decide to login/join)
+create policy "Users Manage Own Profile" on public.profiles for all using (auth.uid() = id);
+
+-- Storage Policies
+drop policy if exists "Public Access" on storage.objects;
+create policy "Public Access" on storage.objects for select using (bucket_id = 'avatars');
+create policy "Public Upload" on storage.objects for insert with check (bucket_id = 'avatars');
 -----------------------------------------------------------
